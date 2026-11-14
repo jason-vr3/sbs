@@ -1,7 +1,7 @@
 #!/bin/bash
 # sbs - sing-box 一键安装与管理脚本（官方源版，专注 VLESS-Reality + Hysteria2）
-# 版本: 1.3.6 (基于 sbs-3.5.sh 定点优化版)
-# GitHub: https://github.com/jason-vr3/sbs (v1.0 为首次公开版本，脚本版本 1.3.6)
+# 版本: 1.0
+# GitHub: https://github.com/jason-vr3/sbs (公开版本 v1.0)
 # 适用: Debian 12 / Ubuntu 22.04 / 24.04，amd64 / arm64
 # 用法: bash sbs.sh ，首次运行后直接输入 sbs 即可进入管理菜单
 # 注意: 本脚本只使用两个官方来源：
@@ -9,7 +9,7 @@
 #   2. acme.sh 官方安装脚本 https://get.acme.sh
 # 配置仅使用单个 /etc/sing-box/config.json，所有配置备份、密钥记录与导出片段统一存放在 /root/ 下。
 
-SCRIPT_VERSION="1.3.6"
+SCRIPT_VERSION="1.0"
 # 如果你将本脚本上传到了自己的 GitHub 仓库，可将下方变量填为你的 Raw 直链地址，即可在菜单 12 中直接回车一键更新
 DEFAULT_SCRIPT_URL="https://raw.githubusercontent.com/jason-vr3/sbs/main/sbs.sh"
 
