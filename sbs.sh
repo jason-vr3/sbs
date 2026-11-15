@@ -1,7 +1,7 @@
 #!/bin/bash
 # sbs - sing-box 一键安装与管理脚本（官方源版，专注 VLESS-Reality + Hysteria2）
-# 版本: 1.0
-# GitHub: https://github.com/jason-vr3/sbs (公开版本 v1.0)
+# 版本: 1.1
+# GitHub: https://github.com/jason-vr3/sbs (公开版本 v1.1)
 # 适用: Debian 12 / Ubuntu 22.04 / 24.04，amd64 / arm64
 # 用法: bash sbs.sh ，首次运行后直接输入 sbs 即可进入管理菜单
 # 注意: 本脚本只使用两个官方来源：
@@ -9,7 +9,7 @@
 #   2. acme.sh 官方安装脚本 https://get.acme.sh
 # 配置仅使用单个 /etc/sing-box/config.json，所有配置备份、密钥记录与导出片段统一存放在 /root/ 下。
 
-SCRIPT_VERSION="1.0"
+SCRIPT_VERSION="1.1"
 # 如果你将本脚本上传到了自己的 GitHub 仓库，可将下方变量填为你的 Raw 直链地址，即可在菜单 12 中直接回车一键更新
 DEFAULT_SCRIPT_URL="https://raw.githubusercontent.com/jason-vr3/sbs/main/sbs.sh"
 
@@ -295,6 +295,14 @@ fix_sb_perms() {
 	else
 		[[ -f "$SB_CONFIG" ]] && chmod 644 "$SB_CONFIG" 2>/dev/null || true
 	fi
+}
+
+restart_sb_service() {
+	if systemctl restart "$SB_SERVICE" && systemctl is-active --quiet "$SB_SERVICE"; then
+		return 0
+	fi
+	red "重启 sing-box 失败或服务未运行，请查看日志：journalctl -u sing-box -n 50 --no-pager"
+	return 1
 }
 
 config_exists() { [[ -f "$SB_CONFIG" ]]; }
@@ -833,9 +841,10 @@ show_cert() {
 			if install_cert_to_singbox "$target_d"; then
 				read_current_values
 				if [[ -f "$SB_CONFIG" ]]; then
-					rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$target_d" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN" || true
-					green "已成功导入并启用本机证书 ($target_d)，Hysteria2 节点配置已同步更新！"
-					show_nodes || true
+					if rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$target_d" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN"; then
+						green "已成功导入并启用本机证书 ($target_d)，Hysteria2 节点配置已同步更新！"
+						show_nodes || true
+					fi
 				else
 					CUR_HY2_DOMAIN="$target_d"
 					save_keys_file "$CUR_PUB"
@@ -898,9 +907,10 @@ import_custom_cert_file() {
 
 	read_current_values
 	if [[ -f "$SB_CONFIG" ]]; then
-		rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$custom_domain" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN" || true
-		green "Hysteria2 节点已更新并启用域名 $custom_domain ！"
-		show_nodes || true
+		if rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$custom_domain" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN"; then
+			green "Hysteria2 节点已更新并启用域名 $custom_domain ！"
+			show_nodes || true
+		fi
 	fi
 	return 0
 }
@@ -1211,10 +1221,10 @@ install_singbox() {
 
 # ---------- 状态面板 ----------
 show_status() {
-	echo "=============================================="
-	echo " sbs - sing-box 管理脚本 v$SCRIPT_VERSION（快捷命令: sbs）"
-	echo "=============================================="
-	local os_pretty kernel arch virt bbr ip ip6 sb_stat
+	blue "=============================================="
+	echo -e " \033[36m\033[01msbs - sing-box 管理脚本 v$SCRIPT_VERSION\033[0m（快捷命令: \033[32m\033[01msbs\033[0m）"
+	blue "=============================================="
+	local os_pretty kernel arch virt bbr ip ip6 sb_stat sb_stat_color
 	os_pretty="$(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "未知")"
 	kernel="$(uname -r)"
 	arch="$(uname -m)"
@@ -1222,30 +1232,34 @@ show_status() {
 	bbr="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "未知")"
 	ip="$(get_ip)"
 	ip6="$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i ~ /:/) print $i}' | head -n 1)"
-	echo "系统：$os_pretty | 内核：$kernel | 架构：$arch | 虚拟化：$virt | 拥塞算法：$bbr"
-	echo "IPv4 地址：${ip:-未知} | IPv6 地址：${ip6:-无}"
+	echo -e "系统：\033[37m$os_pretty\033[0m | 架构：\033[37m$arch\033[0m | 虚拟化：\033[37m$virt\033[0m | 拥塞算法：\033[36m$bbr\033[0m"
+	echo -e "IPv4：\033[32m${ip:-未知}\033[0m | IPv6：\033[36m${ip6:-无}\033[0m"
 
 	if ! singbox_installed; then
 		sb_stat="未安装"
+		sb_stat_color="\033[31m\033[01m${sb_stat}\033[0m"
 	elif systemctl is-active --quiet "$SB_SERVICE" 2>/dev/null; then
 		sb_stat="运行中"
+		sb_stat_color="\033[32m\033[01m${sb_stat}\033[0m"
 	elif [[ -f "$SB_CONFIG" ]]; then
 		sb_stat="已安装，未运行"
+		sb_stat_color="\033[31m\033[01m${sb_stat}\033[0m"
 	else
 		sb_stat="已安装，未配置"
+		sb_stat_color="\033[33m\033[01m${sb_stat}\033[0m"
 	fi
-	echo "Sing-box 状态：$sb_stat | 内核版本：$(singbox_version 2>/dev/null || echo "未安装")"
+	echo -e "内核状态：${sb_stat_color} | 内核版本：\033[36m$(singbox_version 2>/dev/null || echo "未安装")\033[0m"
 	echo ""
-	echo "节点启用状态："
+	yellow "节点运行状态："
 	if [[ -f "$SB_CONFIG" ]]; then
 		if cfg_vless_enabled; then
 			local v_tot=0
 			if cmd_exists iptables && iptables -L SBS_IN -n >/dev/null 2>&1; then
 				v_tot=$(( $(get_port_bytes tcp "$(cfg_vless_port)" in) + $(get_port_bytes tcp "$(cfg_vless_port)" out) ))
 			fi
-			echo " [VLESS-Reality] 已启用 | TCP 端口：$(cfg_vless_port) | SNI：$(cfg_reality_sni) | 累计流量：$(human_bytes "$v_tot")"
+			echo -e " \033[32m●\033[0m [VLESS-Reality] \033[32m已启用\033[0m | TCP 端口：\033[33m$(cfg_vless_port)\033[0m | SNI：\033[36m$(cfg_reality_sni)\033[0m | 流量：\033[32m$(human_bytes "$v_tot")\033[0m"
 		else
-			echo " [VLESS-Reality] 已停用"
+			echo -e " \033[31m○\033[0m [VLESS-Reality] \033[31m已停用\033[0m"
 		fi
 		if cfg_hy2_enabled; then
 			local h_tot=0
@@ -1253,17 +1267,17 @@ show_status() {
 				h_tot=$(( $(get_port_bytes udp "$(cfg_hy2_port)" in) + $(get_port_bytes udp "$(cfg_hy2_port)" out) ))
 			fi
 			if is_real_cert; then
-				echo " [Hysteria-2]    已启用 | UDP 端口：$(cfg_hy2_port) | 模式：域名真实证书 ($(cfg_hy2_domain)) | 累计流量：$(human_bytes "$h_tot")"
+				echo -e " \033[32m●\033[0m [Hysteria-2]    \033[32m已启用\033[0m | UDP 端口：\033[33m$(cfg_hy2_port)\033[0m | 域名证书：\033[36m$(cfg_hy2_domain)\033[0m | 流量：\033[32m$(human_bytes "$h_tot")\033[0m"
 			else
-				echo " [Hysteria-2]    已启用 | UDP 端口：$(cfg_hy2_port) | 模式：免域名自签证书 (SNI: $(cfg_hy2_domain)) | 累计流量：$(human_bytes "$h_tot")"
+				echo -e " \033[32m●\033[0m [Hysteria-2]    \033[32m已启用\033[0m | UDP 端口：\033[33m$(cfg_hy2_port)\033[0m | 免域名自签 (\033[36m$(cfg_hy2_domain)\033[0m) | 流量：\033[32m$(human_bytes "$h_tot")\033[0m"
 			fi
 		else
-			echo " [Hysteria-2]    已停用"
+			echo -e " \033[31m○\033[0m [Hysteria-2]    \033[31m已停用\033[0m"
 		fi
 	else
-		echo " 尚未生成配置（请选择 1 一键安装）"
+		echo -e " \033[33m尚未生成配置（请选择 1 一键安装）\033[0m"
 	fi
-	echo "=============================================="
+	blue "=============================================="
 }
 
 # ---------- 节点链接、二维码与客户端配置片段（Clash Verge / Sing-box） ----------
@@ -1274,6 +1288,7 @@ build_node_uris() {
 	uri_ip="$(format_host_for_uri "$ip")"
 	VLESS_URI=""
 	HY2_URI=""
+	HY2_URI_OFFICIAL=""
 
 	if cfg_vless_enabled; then
 		local vport sni
@@ -1281,8 +1296,6 @@ build_node_uris() {
 		sni="$(cfg_reality_sni)"
 		if [[ -n "$CUR_PUB" ]]; then
 			VLESS_URI="vless://${CUR_UUID}@${uri_ip}:${vport}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=chrome&pbk=${CUR_PUB}&sid=${CUR_SHORT}&type=tcp#sbs-VLESS"
-		else
-			VLESS_URI=""
 		fi
 	fi
 
@@ -1293,8 +1306,10 @@ build_node_uris() {
 		if is_real_cert; then
 			HY2_URI="hysteria2://${CUR_HY2_PASS}@${domain}:${hport}?obfs=salamander&obfs-password=${CUR_OBFS}&sni=${domain}&alpn=h3&insecure=0#sbs-HY2"
 		else
+			local pin_sha256
 			pin_sha256="$(openssl x509 -in "$SB_DIR/fullchain.pem" -noout -fingerprint -sha256 2>/dev/null | awk -F= '{print tolower($2)}' | tr -d ':')"
-			HY2_URI="hysteria2://${CUR_HY2_PASS}@${uri_ip}:${hport}?obfs=salamander&obfs-password=${CUR_OBFS}&sni=${domain}&alpn=h3&insecure=0&allowInsecure=0&pinSHA256=${pin_sha256}#sbs-HY2"
+			HY2_URI="hysteria2://${CUR_HY2_PASS}@${uri_ip}:${hport}?obfs=salamander&obfs-password=${CUR_OBFS}&sni=${domain}&alpn=h3&insecure=0&pinSHA256=${pin_sha256}#sbs-HY2-Xray"
+			HY2_URI_OFFICIAL="hysteria2://${CUR_HY2_PASS}@${uri_ip}:${hport}?obfs=salamander&obfs-password=${CUR_OBFS}&sni=${domain}&alpn=h3&insecure=1&pinSHA256=${pin_sha256}#sbs-HY2-Official"
 		fi
 	fi
 }
@@ -1325,18 +1340,22 @@ show_nodes() {
 	echo ""
 	echo "=== 2. Hysteria2 ==="
 	if cfg_hy2_enabled; then
-		local hy2_host="$CUR_HY2_DOMAIN" mode_desc="ACME 域名真实证书"
-		if ! is_real_cert; then
-			hy2_host="$ip"
-			mode_desc="免域名自签证书 (证书指纹校验 pinSHA256)"
-		fi
-		echo "模式  ：$mode_desc"
-		echo "服务器：$hy2_host | 端口：$CUR_HY2_PORT (UDP) | SNI：$CUR_HY2_DOMAIN | 带宽：${CUR_UP}/${CUR_DOWN} Mbps"
-		echo "密码  ：$CUR_HY2_PASS | 混淆 (salamander)：$CUR_OBFS"
-		echo ""
-		blue "$HY2_URI"
-		if ! is_real_cert; then
-			yellow "提示：上方链接为 Xray 内核客户端 (v2rayN / NekoBox) 专用 (insecure=0 + pinSHA256)；官方 Hysteria2 客户端请把 insecure 改为 1 再导入，或在客户端配置里设 insecure: true + pinSHA256。"
+		if is_real_cert; then
+			echo "模式  ：ACME 域名真实证书（全客户端通用）"
+			echo "服务器：$CUR_HY2_DOMAIN | 端口：$CUR_HY2_PORT (UDP) | SNI：$CUR_HY2_DOMAIN | 带宽：${CUR_UP}/${CUR_DOWN} Mbps"
+			echo "密码  ：$CUR_HY2_PASS | 混淆 (salamander)：$CUR_OBFS"
+			echo ""
+			blue "$HY2_URI"
+		else
+			echo "模式  ：免域名自签证书 (证书指纹校验 pinSHA256)"
+			echo "服务器：$ip | 端口：$CUR_HY2_PORT (UDP) | SNI：$CUR_HY2_DOMAIN | 带宽：${CUR_UP}/${CUR_DOWN} Mbps"
+			echo "密码  ：$CUR_HY2_PASS | 混淆 (salamander)：$CUR_OBFS"
+			echo ""
+			echo "1) Xray 26+ 内核客户端专用（v2rayN / NekoBox / v2rayNG）："
+			blue "$HY2_URI"
+			echo ""
+			echo "2) 官方 Hysteria2 客户端 / sing-box / Shadowrocket 专用："
+			blue "$HY2_URI_OFFICIAL"
 		fi
 	else
 		yellow "当前未启用 Hysteria2"
@@ -1357,14 +1376,27 @@ show_qrcodes() {
 	build_node_uris
 	echo ""
 	if [[ -n "$VLESS_URI" ]]; then
-		green "=== VLESS-Reality 节点二维码（支持 v2rayNG / Shadowrocket / sing-box / NekoBox 扫码） ==="
+		green "=== VLESS-Reality 节点链接与二维码（v2rayNG / Shadowrocket / sing-box / NekoBox） ==="
+		blue "$VLESS_URI"
 		qrencode -t ansiutf8 "$VLESS_URI"
 		echo ""
 	fi
 	if [[ -n "$HY2_URI" ]]; then
-		green "=== Hysteria2 节点二维码（支持 v2rayNG / Shadowrocket / sing-box / NekoBox 扫码） ==="
-		qrencode -t ansiutf8 "$HY2_URI"
-		echo ""
+		if [[ -n "$HY2_URI_OFFICIAL" ]]; then
+			green "=== Hysteria2 [1] Xray 26+ 内核客户端专用（v2rayN / NekoBox / v2rayNG） ==="
+			blue "$HY2_URI"
+			qrencode -t ansiutf8 "$HY2_URI"
+			echo ""
+			green "=== Hysteria2 [2] 官方 Hysteria2 / sing-box / Shadowrocket 专用 ==="
+			blue "$HY2_URI_OFFICIAL"
+			qrencode -t ansiutf8 "$HY2_URI_OFFICIAL"
+			echo ""
+		else
+			green "=== Hysteria2 节点链接与二维码（ACME 真实证书通用版） ==="
+			blue "$HY2_URI"
+			qrencode -t ansiutf8 "$HY2_URI"
+			echo ""
+		fi
 	fi
 	return 0
 }
@@ -1868,9 +1900,10 @@ change_config_menu() {
 			save_keys_file "$pub2"
 			show_clash_snippet >/dev/null 2>&1 || true
 			show_sb_client_snippet >/dev/null 2>&1 || true
-			systemctl restart "$SB_SERVICE" || true
-			green "VLESS 密钥对已更新！"
-			show_nodes || true
+			if restart_sb_service; then
+				green "VLESS 密钥对已更新！"
+				show_nodes || true
+			fi
 			;;
 		6)
 			echo "重新生成后，旧的 HY2 节点链接将立即失效（如 HY2 处于停用状态将一并启用）。"
@@ -1890,9 +1923,10 @@ change_config_menu() {
 			save_keys_file "$CUR_PUB"
 			show_clash_snippet >/dev/null 2>&1 || true
 			show_sb_client_snippet >/dev/null 2>&1 || true
-			systemctl restart "$SB_SERVICE" || true
-			green "HY2 密码已更新！"
-			show_nodes || true
+			if restart_sb_service; then
+				green "HY2 密码已更新！"
+				show_nodes || true
+			fi
 			;;
 		7)
 			local up2 down2
@@ -1959,9 +1993,10 @@ manage_protocols_menu() {
 			save_keys_file "$pub3"
 			show_clash_snippet >/dev/null 2>&1 || true
 			show_sb_client_snippet >/dev/null 2>&1 || true
-			systemctl restart "$SB_SERVICE" || true
-			green "VLESS 已全新重置并启用"
-			show_nodes || true
+			if restart_sb_service; then
+				green "VLESS 已全新重置并启用"
+				show_nodes || true
+			fi
 			;;
 		4)
 			local p2 d="$CUR_HY2_DOMAIN" hp3 ob3
@@ -1986,9 +2021,10 @@ manage_protocols_menu() {
 			save_keys_file "$CUR_PUB"
 			show_clash_snippet >/dev/null 2>&1 || true
 			show_sb_client_snippet >/dev/null 2>&1 || true
-			systemctl restart "$SB_SERVICE" || true
-			green "HY2 已全新重置并启用"
-			show_nodes || true
+			if restart_sb_service; then
+				green "HY2 已全新重置并启用"
+				show_nodes || true
+			fi
 			;;
 		0 | "") return 0 ;;
 		*) red "输入有误，请选择 0-4" ;;
@@ -2048,12 +2084,17 @@ update_core() {
 			return 1
 		}
 		fix_sb_perms
-		if [[ -f "$SB_CONFIG" ]] && ! sing-box check -c "$SB_CONFIG"; then
-			red "新版本配置校验失败，未重启服务"
-			return 1
+		if [[ -f "$SB_CONFIG" ]]; then
+			if ! sing-box check -c "$SB_CONFIG"; then
+				red "新版本配置校验失败，未重启服务"
+				return 1
+			fi
+			if restart_sb_service; then
+				green "已更新至 $(singbox_version)（服务已重启）"
+			fi
+		else
+			green "已更新内核至 $(singbox_version)（尚未生成配置，无需重启服务）"
 		fi
-		systemctl restart "$SB_SERVICE" 2>/dev/null || true
-		green "已更新至 $(singbox_version)"
 		;;
 	2)
 		local ver arch
@@ -2101,13 +2142,18 @@ update_core() {
 		fi
 		rm -rf "$tmpdir"
 		fix_sb_perms
-		if [[ -f "$SB_CONFIG" ]] && ! sing-box check -c "$SB_CONFIG"; then
-			red "新内核校验当前配置未通过，正在自动回滚旧版内核..."
-			[[ -f "$bin_bak" ]] && install -m 755 "$bin_bak" "$bin_target"
-			return 1
+		if [[ -f "$SB_CONFIG" ]]; then
+			if ! sing-box check -c "$SB_CONFIG"; then
+				red "新内核校验当前配置未通过，正在自动回滚旧版内核..."
+				[[ -f "$bin_bak" ]] && install -m 755 "$bin_bak" "$bin_target"
+				return 1
+			fi
+			if restart_sb_service; then
+				green "已成功切换内核版本至 $(singbox_version)（服务已重启）"
+			fi
+		else
+			green "已成功切换内核版本至 $(singbox_version)（尚未生成配置，无需重启服务）"
 		fi
-		systemctl restart "$SB_SERVICE" || true
-		green "已成功切换内核版本至 $(singbox_version)"
 		;;
 	0 | "") return 0 ;;
 	*) red "输入错误" ;;
@@ -2201,11 +2247,12 @@ acme_menu() {
 			if ask_user_domain "请输入要申请/安装的域名" "$CUR_HY2_DOMAIN" d2; then
 				if issue_cert "$d2"; then
 					if [[ -f "$SB_CONFIG" ]]; then
-						rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$d2" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN" || true
+						if rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$d2" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN"; then
+							green "已成功切换为域名 $d2 的 ACME 真实证书！"
+						fi
 					else
-						systemctl restart "$SB_SERVICE" 2>/dev/null || true
+						green "域名 $d2 的 ACME 证书已申请并安装就绪（尚未生成配置，无需重启服务）"
 					fi
-					green "已成功切换为域名 $d2 的 ACME 真实证书！"
 				fi
 			fi
 			;;
@@ -2214,9 +2261,12 @@ acme_menu() {
 			ask_hostname "请输入自签证书伪装域名 (SNI)" "www.bing.com" sni_self
 			if make_self_signed "$sni_self"; then
 				if [[ -f "$SB_CONFIG" ]]; then
-					rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$sni_self" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN" || true
+					if rewrite_with_current "$(current_on_off vless)" "$(current_on_off hy2)" "$CUR_VLESS_PORT" "$CUR_HY2_PORT" "$sni_self" "$CUR_SNI" "$CUR_UP" "$CUR_DOWN"; then
+						green "已切换为免域名自签证书模式（SNI: $sni_self）！"
+					fi
+				else
+					green "免域名自签证书已生成（SNI: $sni_self）"
 				fi
-				green "已切换为免域名自签证书模式（SNI: $sni_self）！"
 			fi
 			;;
 		3)
@@ -2244,9 +2294,9 @@ acme_menu() {
 				press_any_key
 				continue
 			}
-			install_cert_to_singbox "$CUR_HY2_DOMAIN" || continue
-			systemctl restart "$SB_SERVICE" 2>/dev/null || true
-			green "证书强制续期完成并已重启 sing-box"
+			if install_cert_to_singbox "$CUR_HY2_DOMAIN" && restart_sb_service; then
+				green "证书强制续期完成并已重启 sing-box"
+			fi
 			;;
 		5)
 			delete_acme_cert
@@ -2339,19 +2389,20 @@ main_menu() {
 		clear 2>/dev/null || true
 		show_status
 		echo ""
-		echo " 1）一键安装 Sing-box（VLESS-Reality + Hysteria2，支持免域名/有域名）"
-		echo " 2）卸载 Sing-box（彻底清除代理业务，可选保留或清除 ACME 证书）"
-		echo " 3）变更配置（端口 / 证书模式与域名 / SNI / 密钥 / 带宽）"
-		echo " 4）管理协议（单独启停 / 重置单个协议）"
-		echo " 5）查看节点（URI 链接 / 二维码 / Clash Verge / Sing-box）"
-		echo " 6）启动 / 重启 / 停止 Sing-box"
-		echo " 7）更新 / 切换 Sing-box 内核版本"
-		echo " 8）查看 Sing-box 运行日志"
-		echo " 9）一键开启 BBR+FQ 加速"
-		echo "10）管理证书（ACME 真实证书申请、查看与导入本机证书、续期、删除 / 切换自签）"
-		echo "11）查看实时流量监控（按协议实时显示出入速率、连接数与累计流量）"
-		echo "12）更新本脚本 (sbs)"
-		echo " 0）退出"
+		echo -e " \033[36m\033[01m1）\033[0m一键安装 Sing-box（VLESS-Reality + Hysteria2，支持免域名/有域名）"
+		echo -e " \033[31m\033[01m2）\033[0m卸载 Sing-box（彻底清除代理业务，可选保留或清除 ACME 证书）"
+		echo -e " \033[36m\033[01m3）\033[0m变更配置（端口 / 证书模式与域名 / SNI / 密钥 / 带宽）"
+		echo -e " \033[36m\033[01m4）\033[0m管理协议（单独启停 / 重置单个协议）"
+		echo -e " \033[32m\033[01m5）\033[0m查看节点（URI 链接 / 二维码 / Clash Verge / Sing-box）"
+		blue " ----------------------------------------------"
+		echo -e " \033[33m\033[01m6）\033[0m启动 / 重启 / 停止 Sing-box"
+		echo -e " \033[33m\033[01m7）\033[0m更新 / 切换 Sing-box 内核版本"
+		echo -e " \033[33m\033[01m8）\033[0m查看 Sing-box 运行日志"
+		echo -e " \033[33m\033[01m9）\033[0m一键开启 BBR+FQ 加速"
+		echo -e "\033[33m\033[01m10）\033[0m管理证书（ACME 真实证书申请、查看与导入本机证书、续期、删除 / 切换自签）"
+		echo -e "\033[32m\033[01m11）\033[0m查看实时流量监控（按协议实时显示出入速率、连接数与累计流量）"
+		echo -e "\033[36m\033[01m12）\033[0m更新本脚本 (sbs)"
+		echo -e " \033[31m\033[01m0）\033[0m退出"
 		echo ""
 		readp "请输入数字 [0-12]：" choice
 		case "${choice:-}" in
