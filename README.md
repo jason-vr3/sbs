@@ -53,7 +53,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/jason-vr3/sbs/main/sbs.sh)
 
 ## 🖥️ 主界面
 
-![sbs 主界面](docs/screenshot.png)
+![sbs 主界面](docs/screenshot-v1.1.png)
 
 *上图为在测试机上运行 `bash sbs.sh` 的实拍主界面（IP 为测试机地址，状态为未安装；菜单 1–12 与下方表格一致）。*
 
